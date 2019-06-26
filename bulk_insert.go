@@ -3,10 +3,11 @@ package gormbulk
 import (
 	"errors"
 	"fmt"
-	"github.com/jinzhu/gorm"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/jinzhu/gorm"
 )
 
 // Insert multiple records at once
@@ -18,14 +19,25 @@ import (
 func BulkInsert(db *gorm.DB, objects []interface{}, chunkSize int, excludeColumns ...string) error {
 	// Split records with specified size not to exceed Database parameter limit
 	for _, objSet := range splitObjects(objects, chunkSize) {
-		if err := insertObjSet(db, objSet, excludeColumns...); err != nil {
+		if err := insertObjSet(db, objSet, false, excludeColumns...); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func insertObjSet(db *gorm.DB, objects []interface{}, excludeColumns ...string) error {
+// Does the same as BulkInsert but replaces the record if it exists
+func BulkUpsert(db *gorm.DB, objects []interface{}, chunkSize int, excludeColumns ...string) error {
+	// Split records with specified size not to exceed Database parameter limit
+	for _, objSet := range splitObjects(objects, chunkSize) {
+		if err := insertObjSet(db, objSet, true, excludeColumns...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertObjSet(db *gorm.DB, objects []interface{}, isUpsert bool, excludeColumns ...string) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -75,11 +87,19 @@ func insertObjSet(db *gorm.DB, objects []interface{}, excludeColumns ...string) 
 		mainScope.SQLVars = append(mainScope.SQLVars, scope.SQLVars...)
 	}
 
-	mainScope.Raw(fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
-		mainScope.QuotedTableName(),
-		strings.Join(dbColumns, ", "),
-		strings.Join(placeholders, ", "),
-	))
+	if isUpsert {
+		mainScope.Raw(fmt.Sprintf("REPLACE INTO %s (%s) VALUES %s",
+			mainScope.QuotedTableName(),
+			strings.Join(dbColumns, ", "),
+			strings.Join(placeholders, ", "),
+		))
+	} else {
+		mainScope.Raw(fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
+			mainScope.QuotedTableName(),
+			strings.Join(dbColumns, ", "),
+			strings.Join(placeholders, ", "),
+		))
+	}
 
 	return db.Exec(mainScope.SQL, mainScope.SQLVars...).Error
 }
